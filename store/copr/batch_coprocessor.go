@@ -15,9 +15,12 @@
 package copr
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -96,6 +99,132 @@ func (rs *batchCopResponse) MemSize() int64 {
 
 func (rs *batchCopResponse) RespTime() time.Duration {
 	return rs.respTime
+}
+
+func deepCopyStoreTaskMap(storeTaskMap map[uint64]*batchCopTask) map[uint64]*batchCopTask {
+	storeTasks := make(map[uint64]*batchCopTask)
+	for storeID, task := range storeTaskMap {
+		t := batchCopTask{
+			storeAddr: task.storeAddr,
+			cmdType:   task.cmdType,
+			ctx:       task.ctx,
+		}
+		t.regionInfos = make([]RegionInfo, len(task.regionInfos))
+		copy(t.regionInfos, task.regionInfos)
+		storeTasks[storeID] = &t
+	}
+	return storeTasks
+}
+
+func regionTotalCount(storeTasks map[uint64]*batchCopTask, candidateRegionInfos []RegionInfo) int {
+	count := len(candidateRegionInfos)
+	for _, task := range storeTasks {
+		count += len(task.regionInfos)
+	}
+	return count
+}
+
+func findRegionInfo(regionInfos []RegionInfo, selected []bool, start int, storeID uint64) int {
+	for i := start; i < len(regionInfos); i++ {
+		if selected[i] {
+			continue
+		}
+		for _, sid := range regionInfos[i].AllStores {
+			if sid == storeID {
+				selected[i] = true
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// Try to select 'cnt' RegionInfos from candidateRegionInfos to regionInfos that belong to storeID.
+// Return {new regionInfo, next start index, select count in this round}
+func selectCandidateRegionInfos(storeID uint64, regionInfos []RegionInfo, candidateRegionInfos []RegionInfo, selected []bool, start int, cnt int) ([]RegionInfo, int, int) {
+	i := 0
+	for ; i < cnt; i++ {
+		start := findRegionInfo(candidateRegionInfos, selected, start, storeID)
+		if start == -1 {
+			break
+		}
+		regionInfos = append(regionInfos, candidateRegionInfos[start])
+		start += 1
+	}
+	return regionInfos, start, i
+}
+
+func checkBatchCopTaskBalance(storeTasks map[uint64]*batchCopTask) (bool, []string) {
+	if len(storeTasks) == 0 {
+		return true, []string{}
+	}
+	max_region_count := 0
+	min_region_count := math.MaxInt32
+	balance_infos := []string{}
+	for storeID, task := range storeTasks {
+		cnt := len(task.regionInfos)
+		if cnt > max_region_count {
+			max_region_count = cnt
+		}
+		if cnt < min_region_count {
+			min_region_count = cnt
+		}
+		balance_infos = append(balance_infos, fmt.Sprintf("storeID %d storeAddr %s regionCount %d", storeID, task.storeAddr, cnt))
+	}
+	return max_region_count-min_region_count < 20 || (min_region_count > 0 && float64(max_region_count-min_region_count)/float64(min_region_count) < 0.10), balance_infos
+}
+
+func balanceBatchCopTaskWithContiguousRange(storeTaskMap map[uint64]*batchCopTask, candidateRegionInfos []RegionInfo) []*batchCopTask {
+	regionCount := regionTotalCount(storeTaskMap, candidateRegionInfos)
+	if regionCount < 100 {
+		return nil
+	}
+	storeTasks := deepCopyStoreTaskMap(storeTaskMap)
+	// Sort regions by their key ranges.
+	sort.Slice(candidateRegionInfos, func(i, j int) bool {
+		// Special case: Sort empty ranges to the end.
+		if candidateRegionInfos[i].Ranges.Len() < 1 || candidateRegionInfos[j].Ranges.Len() < 1 {
+			return candidateRegionInfos[i].Ranges.Len() > candidateRegionInfos[j].Ranges.Len()
+		}
+		// StartKey0 < StartKey1
+		return bytes.Compare(candidateRegionInfos[i].Ranges.At(0).StartKey, candidateRegionInfos[j].Ranges.At(0).StartKey) == -1
+	})
+
+	selected := make([]bool, len(candidateRegionInfos))
+	start := 0
+	for {
+		total := 0
+		selectCount := 0
+		for storeID, task := range storeTasks {
+			cnt := 0
+			task.regionInfos, start, cnt = selectCandidateRegionInfos(storeID, task.regionInfos, candidateRegionInfos, selected, start, 10)
+			total += len(task.regionInfos)
+			selectCount += cnt
+		}
+		if total >= regionCount {
+			break
+		}
+		if selectCount == 0 {
+			logutil.BgLogger().Error("selectCandidateRegionInfos fail: some region cannot find relevant store.")
+			return nil
+		}
+		if start == -1 {
+			start = 0
+		}
+	}
+
+	if ok, balanceInfos := checkBatchCopTaskBalance(storeTasks); !ok {
+		logutil.BgLogger().Error("checkBatchCopTaskBalance fail", zap.Strings("balanceInfos", balanceInfos))
+		return nil
+	}
+
+	var res []*batchCopTask
+	for _, task := range storeTasks {
+		if len(task.regionInfos) > 0 {
+			res = append(res, task)
+		}
+	}
+	return res
 }
 
 // balanceBatchCopTask balance the regions between available stores, the basic rule is
@@ -188,6 +317,7 @@ func balanceBatchCopTask(ctx context.Context, kvStore *kvStore, originalTasks []
 		wg.Wait()
 	}
 
+	var candidateRegionInfos []RegionInfo
 	for _, task := range originalTasks {
 		for index, ri := range task.regionInfos {
 			// for each region, figure out the valid store num
@@ -214,6 +344,7 @@ func balanceBatchCopTask(ctx context.Context, kvStore *kvStore, originalTasks []
 				// to store candidate map
 				totalRegionCandidateNum += validStoreNum
 				totalRemainingRegionNum += 1
+				candidateRegionInfos = append(candidateRegionInfos, ri)
 				taskKey := ri.Region.String()
 				for _, storeID := range ri.AllStores {
 					if _, validStore := storeTaskMap[storeID]; !validStore {
@@ -232,6 +363,12 @@ func balanceBatchCopTask(ctx context.Context, kvStore *kvStore, originalTasks []
 				}
 			}
 		}
+	}
+
+	// If balanceBatchCopTaskWithContiguousRange return nil, it will fallback to the original balance logic.
+	// So storeTaskMap should not be modify.
+	if tasks := balanceBatchCopTaskWithContiguousRange(storeTaskMap, candidateRegionInfos); tasks != nil {
+		return tasks
 	}
 
 	if totalRemainingRegionNum > 0 {
