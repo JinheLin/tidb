@@ -202,6 +202,7 @@ deprecate-integer-display-length = true
 enable-enum-length-limit = false
 stores-refresh-interval = 30
 enable-forwarding = true
+mpp-balance-for-continuity = false
 [performance]
 txn-total-size-limit=2000
 tcp-no-delay = false
@@ -287,6 +288,7 @@ receiver-address = "127.0.0.1:10100"
 	require.True(t, conf.DeprecateIntegerDisplayWidth)
 	require.False(t, conf.EnableEnumLengthLimit)
 	require.True(t, conf.EnableForwarding)
+	require.False(t, conf.MPPBalanceForContinuity)
 	require.Equal(t, uint64(30), conf.StoresRefreshInterval)
 	require.Equal(t, uint(123), conf.PessimisticTxn.DeadlockHistoryCapacity)
 	require.True(t, conf.PessimisticTxn.DeadlockHistoryCollectRetryable)

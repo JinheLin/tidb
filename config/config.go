@@ -184,6 +184,9 @@ type Config struct {
 	// 1. there is a network partition problem between TiDB and PD leader.
 	// 2. there is a network partition problem between TiDB and TiKV leader.
 	EnableForwarding bool `toml:"enable-forwarding" json:"enable-forwarding"`
+	// If MPPBalanceForContinuity is false, MPP balance strategy only considers region count between TiFlashs.
+	// Or it will take into account region count and region continuity.
+	MPPBalanceForContinuity bool `toml:"mpp-balance-for-continuity" json:"mpp-balance-for-continuity"`
 }
 
 // UpdateTempStoragePath is to update the `TempStoragePath` if port/statusPort was changed
@@ -695,6 +698,7 @@ var defaultConf = Config{
 	EnableEnumLengthLimit:        true,
 	StoresRefreshInterval:        defTiKVCfg.StoresRefreshInterval,
 	EnableForwarding:             defTiKVCfg.EnableForwarding,
+	MPPBalanceForContinuity:      true,
 }
 
 var (

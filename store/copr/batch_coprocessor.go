@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/mpp"
 	"github.com/pingcap/log"
+	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/store/driver/backoff"
 	derr "github.com/pingcap/tidb/store/driver/error"
@@ -367,8 +368,10 @@ func balanceBatchCopTask(ctx context.Context, kvStore *kvStore, originalTasks []
 
 	// If balanceBatchCopTaskWithContiguousRange return nil, it will fallback to the original balance logic.
 	// So storeTaskMap should not be modify.
-	if tasks := balanceBatchCopTaskWithContiguousRange(storeTaskMap, candidateRegionInfos); tasks != nil {
-		return tasks
+	if config.GetGlobalConfig().MPPBalanceForContinuity {
+		if tasks := balanceBatchCopTaskWithContiguousRange(storeTaskMap, candidateRegionInfos); tasks != nil {
+			return tasks
+		}
 	}
 
 	if totalRemainingRegionNum > 0 {
@@ -595,11 +598,11 @@ func (b *batchCopIterator) run(ctx context.Context) {
 	for _, task := range b.tasks {
 		b.wg.Add(1)
 		boMaxSleep := copNextMaxBackoff
-		failpoint.Inject("ReduceCopNextMaxBackoff", func(value failpoint.Value) {
+		if value, _err_ := failpoint.Eval(_curpkg_("ReduceCopNextMaxBackoff")); _err_ == nil {
 			if value.(bool) {
 				boMaxSleep = 2
 			}
-		})
+		}
 		bo := backoff.NewBackofferWithVars(ctx, boMaxSleep, b.vars)
 		go b.handleTask(ctx, bo, task)
 	}
