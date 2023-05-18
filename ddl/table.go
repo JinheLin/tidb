@@ -1342,6 +1342,17 @@ func (w *worker) onSetTableFlashReplica(d *ddlCtx, t *meta.Meta, job *model.Job)
 			LocationLabels: replicaInfo.Labels,
 			Available:      available,
 		}
+		// Initialize tiflash sync progress
+		if !tblInfo.TiFlashReplica.Available {
+			if _, exist := infosync.GetTiFlashProgressFromCache(tblInfo.ID); !exist {
+				err := infosync.UpdateTiFlashProgressCache(tblInfo.ID /*progress*/, 0.0)
+				if err != nil {
+					logutil.BgLogger().Error("Initialize tiflash sync progress to cache failed",
+						zap.Error(err),
+						zap.Int64("tableID", tblInfo.ID))
+				}
+			}
+		}
 	} else {
 		if tblInfo.TiFlashReplica != nil {
 			err = infosync.DeleteTiFlashTableSyncProgress(tblInfo)

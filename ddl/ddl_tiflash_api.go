@@ -24,15 +24,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/config"
 	ddlutil "github.com/pingcap/tidb/ddl/util"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/infoschema"
+	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/store/helper"
@@ -392,7 +395,7 @@ func pollAvailableTableProgress(schemas infoschema.InfoSchema, ctx sessionctx.Co
 			element = element.Next()
 			continue
 		}
-		progress, err := infosync.CalculateTiFlashProgress(availableTableID.ID, tableInfo.TiFlashReplica.Count, pollTiFlashContext.TiFlashStores)
+		progress, _, err := infosync.CalculateTiFlashProgress(availableTableID.ID, tableInfo.TiFlashReplica.Count, pollTiFlashContext.TiFlashStores)
 		if err != nil {
 			logutil.BgLogger().Error("get tiflash sync progress failed",
 				zap.Error(err),
@@ -496,13 +499,24 @@ func (d *ddl) refreshTiFlashTicker(ctx sessionctx.Context, pollTiFlashContext *T
 				continue
 			}
 
-			progress, err := infosync.CalculateTiFlashProgress(tb.ID, tb.Count, pollTiFlashContext.TiFlashStores)
+			progress, userStorageSize, err := infosync.CalculateTiFlashProgress(tb.ID, tb.Count, pollTiFlashContext.TiFlashStores)
 			if err != nil {
 				logutil.BgLogger().Error("get tiflash sync progress failed",
 					zap.Error(err),
 					zap.Int64("tableID", tb.ID),
 				)
 				continue
+			}
+
+			// Calculate tiflash sync data size since last time.
+			if config.GetGlobalConfig().DisaggregatedTiFlash && userStorageSize > 0 {
+				if lastProgress, exist := infosync.GetTiFlashProgressFromCache(tb.ID); exist {
+					if writeBytes := float64(userStorageSize) * (progress - lastProgress); writeBytes > 0 {
+						// Reference: https://docs.pingcap.com/tidb/dev/tidb-resource-control
+						// For write request, 1 RU per KB.
+						metrics.TiFlashReplicaSyncRUCounter.WithLabelValues(strconv.FormatInt(tb.ID, 10)).Add(math.Ceil(writeBytes / 1024))
+					}
+				}
 			}
 
 			err = infosync.UpdateTiFlashProgressCache(tb.ID, progress)

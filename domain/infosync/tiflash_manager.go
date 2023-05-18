@@ -66,12 +66,12 @@ type TiFlashReplicaManager interface {
 	PostAccelerateSchedule(ctx context.Context, tableID int64) error
 	// PostAccelerateScheduleBatch sends `regions/accelerate-schedule/batch` request.
 	PostAccelerateScheduleBatch(ctx context.Context, tableIDs []int64) error
-	// GetRegionCountFromPD is a helper function calling `/stats/region`.
-	GetRegionCountFromPD(ctx context.Context, tableID int64, regionCount *int) error
+	// GetRegionStatsFromPD is a helper function calling `/stats/region`.
+	GetRegionStatsFromPD(ctx context.Context, tableID int64) (*helper.PDRegionStats, error)
 	// GetStoresStat gets the TiKV store information by accessing PD's api.
 	GetStoresStat(ctx context.Context) (*helper.StoresStat, error)
 	// CalculateTiFlashProgress calculates TiFlash replica progress
-	CalculateTiFlashProgress(tableID int64, replicaCount uint64, TiFlashStores map[int64]helper.StoreStat) (float64, error)
+	CalculateTiFlashProgress(tableID int64, replicaCount uint64, TiFlashStores map[int64]helper.StoreStat) (float64, int64, error)
 	// UpdateTiFlashProgressCache updates tiflashProgressCache
 	UpdateTiFlashProgressCache(tableID int64, progress float64)
 	// GetTiFlashProgressFromCache gets tiflash replica progress from tiflashProgressCache
@@ -123,25 +123,26 @@ func getTiFlashPeerWithoutLagCount(tiFlashStores map[int64]helper.StoreStat, key
 }
 
 // calculateTiFlashProgress calculates progress based on the region status from PD and TiFlash.
-func calculateTiFlashProgress(keyspaceID tikv.KeyspaceID, tableID int64, replicaCount uint64, tiFlashStores map[int64]helper.StoreStat) (float64, error) {
-	var regionCount int
-	if err := GetTiFlashRegionCountFromPD(context.Background(), tableID, &regionCount); err != nil {
+func calculateTiFlashProgress(keyspaceID tikv.KeyspaceID, tableID int64, replicaCount uint64, tiFlashStores map[int64]helper.StoreStat) (float64, int64, error) {
+	stats, err := GetTiFlashRegionStatsFromPD(context.Background(), tableID)
+	if err != nil {
 		logutil.BgLogger().Error("Fail to get regionCount from PD.",
 			zap.Int64("tableID", tableID))
-		return 0, errors.Trace(err)
+		return 0, 0, errors.Trace(err)
 	}
 
+	regionCount := stats.Count
 	if regionCount == 0 {
 		logutil.BgLogger().Warn("region count getting from PD is 0.",
 			zap.Int64("tableID", tableID))
-		return 0, fmt.Errorf("region count getting from PD is 0")
+		return 0, 0, fmt.Errorf("region count getting from PD is 0")
 	}
 
 	tiflashPeerCount, err := getTiFlashPeerWithoutLagCount(tiFlashStores, keyspaceID, tableID)
 	if err != nil {
 		logutil.BgLogger().Error("Fail to get peer count from TiFlash.",
 			zap.Int64("tableID", tableID))
-		return 0, errors.Trace(err)
+		return 0, 0, errors.Trace(err)
 	}
 	progress := float64(tiflashPeerCount) / float64(regionCount*int(replicaCount))
 	if progress > 1 { // when pd do balance
@@ -153,7 +154,7 @@ func calculateTiFlashProgress(keyspaceID tikv.KeyspaceID, tableID int64, replica
 		logutil.BgLogger().Debug("TiFlash replica progress < 1.",
 			zap.Int64("tableID", tableID), zap.Int("tiflashPeerCount", tiflashPeerCount), zap.Int("regionCount", regionCount), zap.Uint64("replicaCount", replicaCount))
 	}
-	return progress, nil
+	return progress, stats.UserStorageSize, nil
 }
 
 func encodeRule(c tikv.Codec, rule *placement.TiFlashRule) placement.TiFlashRule {
@@ -174,7 +175,7 @@ func encodeRuleID(c tikv.Codec, ruleID string) string {
 }
 
 // CalculateTiFlashProgress calculates TiFlash replica progress.
-func (m *TiFlashReplicaManagerCtx) CalculateTiFlashProgress(tableID int64, replicaCount uint64, tiFlashStores map[int64]helper.StoreStat) (float64, error) {
+func (m *TiFlashReplicaManagerCtx) CalculateTiFlashProgress(tableID int64, replicaCount uint64, tiFlashStores map[int64]helper.StoreStat) (float64, int64, error) {
 	return calculateTiFlashProgress(m.codec.GetKeyspaceID(), tableID, replicaCount, tiFlashStores)
 }
 
@@ -519,8 +520,8 @@ func (m *TiFlashReplicaManagerCtx) PostAccelerateScheduleBatch(ctx context.Conte
 	return nil
 }
 
-// GetRegionCountFromPD is a helper function calling `/stats/region`.
-func (m *TiFlashReplicaManagerCtx) GetRegionCountFromPD(ctx context.Context, tableID int64, regionCount *int) error {
+// GetRegionStatsFromPD is a helper function calling `/stats/region`.
+func (m *TiFlashReplicaManagerCtx) GetRegionStatsFromPD(ctx context.Context, tableID int64) (*helper.PDRegionStats, error) {
 	startKey := tablecodec.GenTableRecordPrefix(tableID)
 	endKey := tablecodec.EncodeTablePrefix(tableID + 1)
 	startKey, endKey = m.codec.EncodeRegionRange(startKey, endKey)
@@ -530,18 +531,17 @@ func (m *TiFlashReplicaManagerCtx) GetRegionCountFromPD(ctx context.Context, tab
 		url.QueryEscape(string(endKey)))
 	res, err := doRequest(ctx, "GetPDRegionStats", m.etcdCli.Endpoints(), p, "GET", nil)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	if res == nil {
-		return fmt.Errorf("TiFlashReplicaManagerCtx returns error in GetRegionCountFromPD")
+		return nil, fmt.Errorf("TiFlashReplicaManagerCtx returns error in GetRegionStatsFromPD")
 	}
 	var stats helper.PDRegionStats
 	err = json.Unmarshal(res, &stats)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
-	*regionCount = stats.Count
-	return nil
+	return &stats, nil
 }
 
 // GetStoresStat gets the TiKV store information by accessing PD's api.
@@ -814,11 +814,12 @@ func (tiflash *MockTiFlash) HandlePostAccelerateSchedule(endKey string) error {
 	return nil
 }
 
-// HandleGetPDRegionRecordStats is mock function for GetRegionCountFromPD.
+// HandleGetPDRegionRecordStats is mock function for GetRegionStatsFromPD.
 // It currently always returns 1 Region for convenience.
 func (tiflash *MockTiFlash) HandleGetPDRegionRecordStats(_ int64) helper.PDRegionStats {
 	return helper.PDRegionStats{
-		Count: 1,
+		Count:           1,
+		UserStorageSize: 10000,
 	}
 }
 
@@ -986,7 +987,7 @@ func (tiflash *MockTiFlash) PdSwitch(enabled bool) {
 }
 
 // CalculateTiFlashProgress return truncated string to avoid float64 comparison.
-func (m *mockTiFlashReplicaManagerCtx) CalculateTiFlashProgress(tableID int64, replicaCount uint64, tiFlashStores map[int64]helper.StoreStat) (float64, error) {
+func (m *mockTiFlashReplicaManagerCtx) CalculateTiFlashProgress(tableID int64, replicaCount uint64, tiFlashStores map[int64]helper.StoreStat) (float64, int64, error) {
 	return calculateTiFlashProgress(tikv.NullspaceID, tableID, replicaCount, tiFlashStores)
 }
 
@@ -1108,16 +1109,15 @@ func (m *mockTiFlashReplicaManagerCtx) PostAccelerateScheduleBatch(ctx context.C
 	return nil
 }
 
-// GetRegionCountFromPD is a helper function calling `/stats/region`.
-func (m *mockTiFlashReplicaManagerCtx) GetRegionCountFromPD(ctx context.Context, tableID int64, regionCount *int) error {
+// GetRegionStatsFromPD is a helper function calling `/stats/region`.
+func (m *mockTiFlashReplicaManagerCtx) GetRegionStatsFromPD(ctx context.Context, tableID int64) (*helper.PDRegionStats, error) {
 	m.Lock()
 	defer m.Unlock()
 	if m.tiflash == nil {
-		return nil
+		return nil, fmt.Errorf("mockTiFlashReplicaManagerCtx.tiflash is nil in GetRegionStatsFromPD")
 	}
 	stats := m.tiflash.HandleGetPDRegionRecordStats(tableID)
-	*regionCount = stats.Count
-	return nil
+	return &stats, nil
 }
 
 // GetStoresStat gets the TiKV store information by accessing PD's api.
