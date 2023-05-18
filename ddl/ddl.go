@@ -66,6 +66,7 @@ import (
 	"github.com/pingcap/tidb/util/mathutil"
 	"github.com/pingcap/tidb/util/syncutil"
 	"github.com/tikv/client-go/v2/tikvrpc"
+	rmclient "github.com/tikv/pd/client/resource_group/controller"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -161,7 +162,20 @@ var (
 	// a newly created table. It takes effect only if the Storage supports split
 	// region.
 	EnableSplitTableRegion = uint32(0)
+
+	// resourceGroupCtl is the ResourceGroupController in pd client
+	resourceGroupCtl *rmclient.ResourceGroupsController
 )
+
+// SetResourceGroupController set a inited ResourceGroupsController for calibrate usage.
+func SetResourceGroupController(rc *rmclient.ResourceGroupsController) {
+	resourceGroupCtl = rc
+}
+
+// GetResourceGroupController returns the ResourceGroupsController.
+//func GetResourceGroupController() *rmclient.ResourceGroupsController {
+//	return resourceGroupCtl
+//}
 
 // DDL is responsible for updating schema in data store and maintaining in-memory InfoSchema cache.
 type DDL interface {
