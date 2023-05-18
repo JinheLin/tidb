@@ -60,6 +60,8 @@ var (
 	BackfillProgressGauge *prometheus.GaugeVec
 	DDLJobTableDuration   *prometheus.HistogramVec
 	DDLRunningJobCount    *prometheus.GaugeVec
+
+	TiFlashReplicaSyncRUCounter *prometheus.CounterVec
 )
 
 // InitDDLMetrics initializes defines DDL metrics.
@@ -164,6 +166,14 @@ func InitDDLMetrics() {
 			Subsystem: "ddl",
 			Name:      "running_job_count",
 			Help:      "Running DDL jobs count",
+		}, []string{LblType})
+
+	TiFlashReplicaSyncRUCounter = NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tidb",
+			Subsystem: "ddl",
+			Name:      "tiflash_replia_sync_ru_counter",
+			Help:      "Counter of TiFlash replica sync RU",
 		}, []string{LblType})
 }
 

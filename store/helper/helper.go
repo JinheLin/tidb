@@ -970,6 +970,7 @@ type PDRegionStats struct {
 	Count            int            `json:"count"`
 	EmptyCount       int            `json:"empty_count"`
 	StorageSize      int64          `json:"storage_size"`
+	UserStorageSize  int64          `json:"user_storage_size"`
 	StorageKeys      int64          `json:"storage_keys"`
 	StoreLeaderCount map[uint64]int `json:"store_leader_count"`
 	StorePeerCount   map[uint64]int `json:"store_peer_count"`

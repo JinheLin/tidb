@@ -1332,6 +1332,19 @@ func (w *worker) onSetTableFlashReplica(d *ddlCtx, t *meta.Meta, job *model.Job)
 		}
 	}
 
+	logutil.BgLogger().Debug("SetTiFlashReplica", zap.Int64("tableId", tblInfo.ID), zap.Uint64("count", replicaInfo.Count))
+
+	initTiFlashPhysicalTableSyncProgress := func(id int64) {
+		if _, exist := infosync.GetTiFlashProgressFromCache(id); !exist {
+			err := infosync.UpdateTiFlashProgressCache(id /*progress*/, 0.0)
+			if err != nil {
+				logutil.BgLogger().Error("Initialize tiflash sync progress to cache failed",
+					zap.Error(err),
+					zap.Int64("tableID", id))
+			}
+		}
+	}
+
 	available := false
 	if tblInfo.TiFlashReplica != nil {
 		available = tblInfo.TiFlashReplica.Available
@@ -1341,6 +1354,18 @@ func (w *worker) onSetTableFlashReplica(d *ddlCtx, t *meta.Meta, job *model.Job)
 			Count:          replicaInfo.Count,
 			LocationLabels: replicaInfo.Labels,
 			Available:      available,
+		}
+		if !tblInfo.TiFlashReplica.Available {
+			if tblInfo.Partition != nil {
+				logutil.BgLogger().Debug("SetTiFlashReplica", zap.Int64("tableId", tblInfo.ID), zap.Int("partitions", len(tblInfo.Partition.Definitions)))
+				for _, partition := range tblInfo.Partition.Definitions {
+					logutil.BgLogger().Debug("SetTiFlashReplica", zap.Int64("tableId", tblInfo.ID), zap.Int64("partitionId", partition.ID))
+					initTiFlashPhysicalTableSyncProgress(partition.ID)
+				}
+			} else {
+				logutil.BgLogger().Debug("SetTiFlashReplica not partition", zap.Int64("tableId", tblInfo.ID))
+				initTiFlashPhysicalTableSyncProgress(tblInfo.ID)
+			}
 		}
 	} else {
 		if tblInfo.TiFlashReplica != nil {
