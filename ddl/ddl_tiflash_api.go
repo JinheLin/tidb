@@ -392,7 +392,7 @@ func pollAvailableTableProgress(schemas infoschema.InfoSchema, ctx sessionctx.Co
 			element = element.Next()
 			continue
 		}
-		progress, err := infosync.CalculateTiFlashProgress(availableTableID.ID, tableInfo.TiFlashReplica.Count, pollTiFlashContext.TiFlashStores)
+		progress, _, err := infosync.CalculateTiFlashProgress(availableTableID.ID, tableInfo.TiFlashReplica.Count, pollTiFlashContext.TiFlashStores)
 		if err != nil {
 			logutil.BgLogger().Error("get tiflash sync progress failed",
 				zap.Error(err),
@@ -496,13 +496,21 @@ func (d *ddl) refreshTiFlashTicker(ctx sessionctx.Context, pollTiFlashContext *T
 				continue
 			}
 
-			progress, err := infosync.CalculateTiFlashProgress(tb.ID, tb.Count, pollTiFlashContext.TiFlashStores)
+			progress, _ /*userStorageSize*/, err := infosync.CalculateTiFlashProgress(tb.ID, tb.Count, pollTiFlashContext.TiFlashStores)
 			if err != nil {
 				logutil.BgLogger().Error("get tiflash sync progress failed",
 					zap.Error(err),
 					zap.Int64("tableID", tb.ID),
 				)
 				continue
+			}
+
+			last_progress, exist := infosync.GetTiFlashProgressFromCache(tb.ID)
+			if exist {
+				delta_progress := progress - last_progress
+				if delta_progress > 0 {
+					// report write bytes
+				}
 			}
 
 			err = infosync.UpdateTiFlashProgressCache(tb.ID, progress)
