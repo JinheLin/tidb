@@ -425,31 +425,10 @@ func pollAvailableTableProgress(schemas infoschema.InfoSchema, ctx sessionctx.Co
 	}
 }
 
-type TiFlashReplicaSyncConsumption struct {
-	writeBytes int64
-}
-
-func (req *TiFlashReplicaSyncConsumption) IsWrite() bool {
-	return true
-}
-
-func (req *TiFlashReplicaSyncConsumption) WriteBytes() uint64 {
-	return uint64(req.writeBytes)
-}
-
-func (req *TiFlashReplicaSyncConsumption) StoreID() uint64 {
-	return 0
-}
-
-func NewTiFlashReplicaSyncConsumption(writeBytes int64) *TiFlashReplicaSyncConsumption {
-	return &TiFlashReplicaSyncConsumption{writeBytes: writeBytes}
-}
-
-func reportTiFlashReplicaSyncConsumption(resourceGroupName string, tableId int64, writeBytes int64) {
-	consumption := TiFlashReplicaSyncConsumption{writeBytes: writeBytes}
-	_, _, err := resourceGroupCtl.OnRequestWait(context.Background(), resourceGroupName, &consumption)
+func addTiFlashReplicaSyncConsumption(resourceGroupName string, tableId int64, writeBytes int64) {
+	err := resourceGroupCtl.AddTiFlashReplicaSyncConsumption(context.Background(), resourceGroupName, writeBytes)
 	if err != nil {
-		logutil.BgLogger().Error("reportTiFlashReplicaSyncConsumption",
+		logutil.BgLogger().Error("addTiFlashReplicaSyncConsumption failed",
 			zap.Error(err),
 			zap.String("resourceGroupName", resourceGroupName),
 			zap.Int64("tableId", tableId),
@@ -542,7 +521,7 @@ func (d *ddl) refreshTiFlashTicker(ctx sessionctx.Context, pollTiFlashContext *T
 				lastProgress, exist := infosync.GetTiFlashProgressFromCache(tb.ID)
 				if exist {
 					if writeBytes := int64(float64(userStorageSize) * (progress - lastProgress)); writeBytes > 0 {
-						reportTiFlashReplicaSyncConsumption("default", tb.ID, writeBytes)
+						addTiFlashReplicaSyncConsumption("default", tb.ID, writeBytes)
 					}
 				}
 			}
