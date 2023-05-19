@@ -164,7 +164,7 @@ var (
 	EnableSplitTableRegion = uint32(0)
 
 	// resourceGroupCtl is the ResourceGroupController in pd client
-	resourceGroupCtl *rmclient.ResourceGroupsController
+	resourceGroupCtl *rmclient.ResourceGroupsController = nil
 )
 
 // SetResourceGroupController set a inited ResourceGroupsController for calibrate usage.

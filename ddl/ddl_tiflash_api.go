@@ -30,6 +30,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/config"
 	ddlutil "github.com/pingcap/tidb/ddl/util"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/infoschema"
@@ -424,8 +425,36 @@ func pollAvailableTableProgress(schemas infoschema.InfoSchema, ctx sessionctx.Co
 	}
 }
 
-func reportWriteBytes(writeBytes int64) {
-	_ = resourceGroupCtl.GetConfig()
+type TiFlashReplicaSyncConsumption struct {
+	writeBytes int64
+}
+
+func (req *TiFlashReplicaSyncConsumption) IsWrite() bool {
+	return true
+}
+
+func (req *TiFlashReplicaSyncConsumption) WriteBytes() uint64 {
+	return uint64(req.writeBytes)
+}
+
+func (req *TiFlashReplicaSyncConsumption) StoreID() uint64 {
+	return 0
+}
+
+func NewTiFlashReplicaSyncConsumption(writeBytes int64) *TiFlashReplicaSyncConsumption {
+	return &TiFlashReplicaSyncConsumption{writeBytes: writeBytes}
+}
+
+func reportTiFlashReplicaSyncConsumption(resourceGroupName string, tableId int64, writeBytes int64) {
+	consumption := TiFlashReplicaSyncConsumption{writeBytes: writeBytes}
+	_, _, err := resourceGroupCtl.OnRequestWait(context.Background(), resourceGroupName, &consumption)
+	if err != nil {
+		logutil.BgLogger().Error("reportTiFlashReplicaSyncConsumption",
+			zap.Error(err),
+			zap.String("resourceGroupName", resourceGroupName),
+			zap.Int64("tableId", tableId),
+			zap.Int64("writeBytes", writeBytes))
+	}
 }
 
 func (d *ddl) refreshTiFlashTicker(ctx sessionctx.Context, pollTiFlashContext *TiFlashManagementContext) error {
@@ -509,10 +538,12 @@ func (d *ddl) refreshTiFlashTicker(ctx sessionctx.Context, pollTiFlashContext *T
 				continue
 			}
 
-			lastProgress, exist := infosync.GetTiFlashProgressFromCache(tb.ID)
-			if exist {
-				if writeBytes := int64(float64(userStorageSize) * (progress - lastProgress)); writeBytes > 0 {
-					reportWriteBytes(writeBytes)
+			if config.GetGlobalConfig().DisaggregatedTiFlash && resourceGroupCtl != nil {
+				lastProgress, exist := infosync.GetTiFlashProgressFromCache(tb.ID)
+				if exist {
+					if writeBytes := int64(float64(userStorageSize) * (progress - lastProgress)); writeBytes > 0 {
+						reportTiFlashReplicaSyncConsumption("default", tb.ID, writeBytes)
+					}
 				}
 			}
 
