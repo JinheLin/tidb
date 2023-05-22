@@ -35,6 +35,7 @@ import (
 	derr "github.com/pingcap/tidb/store/driver/error"
 	txn_driver "github.com/pingcap/tidb/store/driver/txn"
 	"github.com/pingcap/tidb/store/gcworker"
+	"github.com/pingcap/tidb/util/execdetails"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/tikv/client-go/v2/config"
 	"github.com/tikv/client-go/v2/tikv"
@@ -112,6 +113,7 @@ func TrySetupGlobalResourceController(ctx context.Context, serverID uint64, s kv
 	}
 	executor.SetResourceGroupController(control)
 	tikv.SetResourceControlInterceptor(control)
+	execdetails.SetResourceGroupController(control)
 	control.Start(ctx)
 	return nil
 }

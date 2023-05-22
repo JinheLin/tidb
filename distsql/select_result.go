@@ -563,14 +563,14 @@ func (r *selectResult) updateCopRuntimeStats(ctx context.Context, copStats *copr
 				detail.NumProducedRows != nil && detail.NumIterations != nil {
 				planID := r.copPlanIDs[i]
 				recorededPlanIDs[r.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl.
-					RecordOneCopTask(planID, r.storeType.Name(), callee, detail)] = 0
+					RecordOneCopTask(planID, r.storeType.Name(), callee, detail, r.ctx.GetSessionVars().ResourceGroupName)] = 0
 			}
 		}
 		num := uint64(0)
 		dummySummary := &tipb.ExecutorExecutionSummary{TimeProcessedNs: &num, NumProducedRows: &num, NumIterations: &num, ExecutorId: nil}
 		for _, planID := range r.copPlanIDs {
 			if _, ok := recorededPlanIDs[planID]; !ok {
-				r.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl.RecordOneCopTask(planID, r.storeType.Name(), callee, dummySummary)
+				r.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl.RecordOneCopTask(planID, r.storeType.Name(), callee, dummySummary, r.ctx.GetSessionVars().ResourceGroupName)
 			}
 		}
 	} else {
@@ -591,7 +591,7 @@ func (r *selectResult) updateCopRuntimeStats(ctx context.Context, copStats *copr
 				detail.NumProducedRows != nil && detail.NumIterations != nil {
 				planID := r.copPlanIDs[i]
 				r.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl.
-					RecordOneCopTask(planID, r.storeType.Name(), callee, detail)
+					RecordOneCopTask(planID, r.storeType.Name(), callee, detail, r.ctx.GetSessionVars().ResourceGroupName)
 			}
 		}
 	}

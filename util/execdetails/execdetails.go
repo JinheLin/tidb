@@ -24,8 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tipb/go-tipb"
 	"github.com/tikv/client-go/v2/util"
+	rmclient "github.com/tikv/pd/client/resource_group/controller"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 )
@@ -52,8 +54,18 @@ type DetailsNeedP90 struct {
 
 type stmtExecDetailKeyType struct{}
 
-// StmtExecDetailKey used to carry StmtExecDetail info in context.Context.
-var StmtExecDetailKey = stmtExecDetailKeyType{}
+var (
+	// StmtExecDetailKey used to carry StmtExecDetail info in context.Context.
+	StmtExecDetailKey = stmtExecDetailKeyType{}
+
+	// resourceGroupCtl is the ResourceGroupController in pd client
+	resourceGroupCtl *rmclient.ResourceGroupsController
+)
+
+// SetResourceGroupController set a inited ResourceGroupsController for calibrate usage.
+func SetResourceGroupController(rc *rmclient.ResourceGroupsController) {
+	resourceGroupCtl = rc
+}
 
 // StmtExecDetails contains stmt level execution detail info.
 type StmtExecDetails struct {
@@ -392,7 +404,7 @@ type CopRuntimeStats struct {
 }
 
 // RecordOneCopTask records a specific cop tasks's execution detail.
-func (crs *CopRuntimeStats) RecordOneCopTask(address string, summary *tipb.ExecutorExecutionSummary) {
+func (crs *CopRuntimeStats) RecordOneCopTask(address string, summary *tipb.ExecutorExecutionSummary, resourceGroupName string) {
 	crs.Lock()
 	defer crs.Unlock()
 
@@ -415,6 +427,11 @@ func (crs *CopRuntimeStats) RecordOneCopTask(address string, summary *tipb.Execu
 				totalLocalRegionNum:                summary.GetTiflashScanContext().GetTotalLocalRegionNum(),
 				totalRemoteRegionNum:               summary.GetTiflashScanContext().GetTotalRemoteRegionNum()}}, threads: int32(summary.GetConcurrency()),
 		totalTasks: 1,
+	}
+	if summary.GetTiflashScanContext() != nil {
+		logutil.BgLogger().Debug("tiflash scan context", zap.String("data", summary.GetTiflashScanContext().String()))
+	} else {
+		logutil.BgLogger().Debug("tiflash scan context is nil")
 	}
 	data.BasicRuntimeStats.loop.Store(int32(*summary.NumIterations))
 	data.BasicRuntimeStats.consume.Store(int64(*summary.TimeProcessedNs))
@@ -821,14 +838,14 @@ func getPlanIDFromExecutionSummary(summary *tipb.ExecutorExecutionSummary) (int,
 }
 
 // RecordOneCopTask records a specific cop tasks's execution detail.
-func (e *RuntimeStatsColl) RecordOneCopTask(planID int, storeType string, address string, summary *tipb.ExecutorExecutionSummary) int {
+func (e *RuntimeStatsColl) RecordOneCopTask(planID int, storeType string, address string, summary *tipb.ExecutorExecutionSummary, resourceGroupName string) int {
 	// for TiFlash cop response, ExecutorExecutionSummary contains executor id, so if there is a valid executor id in
 	// summary, use it overwrite the planID
 	if id, valid := getPlanIDFromExecutionSummary(summary); valid {
 		planID = id
 	}
 	copStats := e.GetOrCreateCopStats(planID, storeType)
-	copStats.RecordOneCopTask(address, summary)
+	copStats.RecordOneCopTask(address, summary, resourceGroupName)
 	return planID
 }
 
