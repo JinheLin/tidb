@@ -167,6 +167,8 @@ type mppIterator struct {
 	enableCollectExecutionInfo bool
 
 	memTracker *memory.Tracker
+
+	resourceGroupName string
 }
 
 func (m *mppIterator) run(ctx context.Context) {
@@ -261,8 +263,8 @@ func (m *mppIterator) handleDispatchReq(ctx context.Context, bo *Backoffer, req 
 			mppReq.Regions = nil
 		}
 	}
-
-	wrappedReq := tikvrpc.NewRequest(tikvrpc.CmdMPPTask, mppReq, kvrpcpb.Context{})
+	// TODO: add resource group name
+	wrappedReq := tikvrpc.NewRequest(tikvrpc.CmdMPPTask, mppReq, kvrpcpb.Context{ResourceControlContext: &kvrpcpb.ResourceControlContext{ResourceGroupName: m.resourceGroupName}})
 	wrappedReq.StoreTp = getEndPointType(kv.TiFlash)
 
 	// TODO: Handle dispatch task response correctly, including retry logic and cancel logic.
@@ -362,6 +364,7 @@ func (m *mppIterator) cancelMppTasks() {
 		Meta: &mpp.TaskMeta{StartTs: m.startTs, QueryTs: m.mppQueryID.QueryTs, LocalQueryId: m.mppQueryID.LocalQueryID, ServerId: m.mppQueryID.ServerID, MppVersion: m.mppVersion.ToInt64()},
 	}
 
+	// Do not calculate RU of cancelMppTask
 	wrappedReq := tikvrpc.NewRequest(tikvrpc.CmdMPPCancel, killReq, kvrpcpb.Context{})
 	wrappedReq.StoreTp = getEndPointType(kv.TiFlash)
 
@@ -413,7 +416,7 @@ func (m *mppIterator) establishMPPConns(bo *Backoffer, req *kv.MPPDispatchReques
 	}
 
 	var err error
-
+	// Don't
 	wrappedReq := tikvrpc.NewRequest(tikvrpc.CmdMPPConn, connReq, kvrpcpb.Context{})
 	wrappedReq.StoreTp = getEndPointType(kv.TiFlash)
 
@@ -561,7 +564,7 @@ func (m *mppIterator) Next(ctx context.Context) (kv.ResultSubset, error) {
 }
 
 // DispatchMPPTasks dispatches all the mpp task and waits for the responses.
-func (c *MPPClient) DispatchMPPTasks(ctx context.Context, variables interface{}, dispatchReqs []*kv.MPPDispatchRequest, needTriggerFallback bool, startTs uint64, mppQueryID kv.MPPQueryID, mppVersion kv.MppVersion, memTracker *memory.Tracker) kv.Response {
+func (c *MPPClient) DispatchMPPTasks(ctx context.Context, variables interface{}, dispatchReqs []*kv.MPPDispatchRequest, needTriggerFallback bool, startTs uint64, mppQueryID kv.MPPQueryID, mppVersion kv.MppVersion, memTracker *memory.Tracker, resourceGroupName string) kv.Response {
 	vars := variables.(*tikv.Variables)
 	ctxChild, cancelFunc := context.WithCancel(ctx)
 	iter := &mppIterator{
@@ -578,6 +581,7 @@ func (c *MPPClient) DispatchMPPTasks(ctx context.Context, variables interface{},
 		needTriggerFallback:        needTriggerFallback,
 		enableCollectExecutionInfo: config.GetGlobalConfig().Instance.EnableCollectExecutionInfo.Load(),
 		memTracker:                 memTracker,
+		resourceGroupName:          resourceGroupName,
 	}
 	go iter.run(ctxChild)
 	return iter

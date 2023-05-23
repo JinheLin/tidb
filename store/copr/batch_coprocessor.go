@@ -1140,6 +1140,7 @@ func (b *batchCopIterator) handleTaskOnce(ctx context.Context, bo *backoff.Backo
 		TableRegions: task.PartitionTableRegions,
 	}
 
+	// TODO: add resource group name
 	req := tikvrpc.NewRequest(task.cmdType, &copReq, kvrpcpb.Context{
 		IsolationLevel: isolationLevelToPB(b.req.IsolationLevel),
 		Priority:       priorityToPB(b.req.Priority),
