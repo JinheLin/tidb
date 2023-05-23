@@ -416,7 +416,7 @@ func (m *mppIterator) establishMPPConns(bo *Backoffer, req *kv.MPPDispatchReques
 	}
 
 	var err error
-	// Don't
+	// Do not calculate RU of establishMPPConn
 	wrappedReq := tikvrpc.NewRequest(tikvrpc.CmdMPPConn, connReq, kvrpcpb.Context{})
 	wrappedReq.StoreTp = getEndPointType(kv.TiFlash)
 

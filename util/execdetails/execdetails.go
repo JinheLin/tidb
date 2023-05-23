@@ -403,6 +403,39 @@ type CopRuntimeStats struct {
 	sync.Mutex
 }
 
+// `reuqestInfo` and `responseInfo` is the implementations that meeting the requirements of `rmclient.ResourceGroupsController`.
+// Since MPP task's response stream cannot be intercepted in `InterceptedClient` 
+type requestInfo struct {
+}
+
+func (req *requestInfo) IsWrite() bool {
+	return false
+}
+
+func (req *requestInfo) WriteBytes() uint64 {
+	return 0
+}
+
+func (req *requestInfo) StoreID() uint64 {
+	return 0
+}
+
+type responseInfo struct {
+	readBytes uint64
+}
+
+func (res *responseInfo) ReadBytes() uint64 {
+	return res.readBytes
+}
+
+func (res *responseInfo) KVCPU() time.Duration {
+	return time.Duration(0)
+}
+
+func (res *responseInfo) Succeed() bool {
+	return true
+}
+
 // RecordOneCopTask records a specific cop tasks's execution detail.
 func (crs *CopRuntimeStats) RecordOneCopTask(address string, summary *tipb.ExecutorExecutionSummary, resourceGroupName string) {
 	crs.Lock()
@@ -429,6 +462,7 @@ func (crs *CopRuntimeStats) RecordOneCopTask(address string, summary *tipb.Execu
 		totalTasks: 1,
 	}
 	if summary.GetTiflashScanContext() != nil {
+		//resourceGroupCtl.OnResponse(resourceGroupName, requestInfo{}, responseInfo{readBytes: summary.GetTiflashScanContext().TotalUserReadBytes})
 		logutil.BgLogger().Debug("tiflash scan context", zap.String("data", summary.GetTiflashScanContext().String()))
 	} else {
 		logutil.BgLogger().Debug("tiflash scan context is nil")

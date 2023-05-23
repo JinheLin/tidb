@@ -1154,7 +1154,7 @@ func (b *batchCopIterator) handleTaskOnce(ctx context.Context, bo *backoff.Backo
 	}
 	req.StoreTp = getEndPointType(kv.TiFlash)
 
-	logutil.BgLogger().Debug("send batch request to ", zap.String("req info", req.String()), zap.Int("cop task len", len(task.regionInfos)))
+	logutil.BgLogger().Debug("send batch request to ", zap.String("req info", req.String()), zap.Int("cop task len", len(task.regionInfos)), zap.Uint64("ts", b.req.StartTs))
 	resp, retry, cancel, err := sender.SendReqToAddr(bo, task.ctx, task.regionInfos, req, readTimeoutUltraLong)
 	// If there are store errors, we should retry for all regions.
 	if retry {
