@@ -113,7 +113,7 @@ type TiCIShardCacheClient struct {
 
 // NewTiCIShardCacheClient creates a new TiCIShardCacheClient instance.
 func NewTiCIShardCacheClient() (*TiCIShardCacheClient, error) {
-	c, err := grpc.DialContext(context.Background(), "127.0.0.1:50061", grpc.WithInsecure())
+	c, err := grpc.DialContext(context.Background(), "127.0.0.1:8500", grpc.WithInsecure())
 	return &TiCIShardCacheClient{c}, err
 }
 
