@@ -39,6 +39,12 @@ func TestFromInt(t *testing.T) {
 		dec := NewDecFromInt(tt.input)
 		str := dec.ToString()
 		require.Equal(t, tt.output, string(str))
+
+		buf2 := make([]byte, 0)
+		buf2, err := dec.WriteBin(20, 0, buf2)
+		require.NoError(t, err)
+
+		fmt.Printf("(\"%d\",%d, %d, \"%x\"),\n", tt.input, 20, 0, buf2)
 	}
 }
 
@@ -56,6 +62,12 @@ func TestFromUint(t *testing.T) {
 		dec.FromUint(tt.input)
 		str := dec.ToString()
 		require.Equal(t, tt.output, string(str))
+
+		buf2 := make([]byte, 0)
+		buf2, err := dec.WriteBin(20, 0, buf2)
+		require.NoError(t, err)
+
+		fmt.Printf("(\"%d\",%d, %d, \"%x\"),\n", tt.input, 20, 0, buf2)
 	}
 }
 
@@ -124,6 +136,12 @@ func TestFromFloat(t *testing.T) {
 		dec := NewDecFromFloatForTest(tt.f)
 		str := dec.ToString()
 		require.Equal(t, tt.s, string(str))
+
+		buf2 := make([]byte, 0)
+		buf2, err := dec.WriteBin(30, 17, buf2)
+		require.NoError(t, err)
+
+		fmt.Printf("(\"%s\",%d, %d, \"%x\"),\n", tt.s, 30, 17, buf2)
 	}
 }
 
@@ -273,6 +291,17 @@ func TestRemoveTrailingZeros(t *testing.T) {
 	for _, ca := range tests {
 		var dec MyDecimal
 		require.NoError(t, dec.FromString([]byte(ca)))
+
+		buf1 := make([]byte, 0)
+		buf1, err := dec.WriteBin(65, 30, buf1)
+		require.NoError(t, err)
+
+		buf2 := make([]byte, 0)
+		buf2, err = dec.WriteBin(50, 20, buf2)
+		require.NoError(t, err)
+
+		fmt.Printf("(\"%s\",65,30,\"%x\"),\n", ca, buf1)
+		fmt.Printf("(\"%s\",50,20,\"%x\"),\n", ca, buf2)
 
 		// calculate the number of digits after point but trailing zero
 		digitsFracExp := 0
